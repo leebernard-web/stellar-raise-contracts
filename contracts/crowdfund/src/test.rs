@@ -2137,3 +2137,129 @@ proptest! {
         );
     }
 }
+
+// ── Auto-Extension Tests ────────────────────────────────────────────────────
+
+#[test]
+fn test_auto_extension_triggered() {
+    let (env, client, creator, token_address, admin) = setup_env();
+
+    let deadline = env.ledger().timestamp() + 7200; // 2 hours from now
+    let goal: i128 = 1_000_000;
+    let min_contribution: i128 = 1_000;
+    let auto_extension_threshold: i128 = 100_000;
+
+    client.initialize(&creator, &token_address, &goal, &deadline, &min_contribution, &Some(auto_extension_threshold));
+
+    // Move to within the auto-extension window (last hour).
+    env.ledger().set_timestamp(deadline - 1800); // 30 minutes before deadline
+
+    let contributor = Address::generate(&env);
+    mint_to(&env, &token_address, &admin, &contributor, 150_000);
+    client.contribute(&contributor, &150_000);
+
+    // Deadline should be extended by 24 hours.
+    let new_deadline = client.deadline();
+    assert_eq!(new_deadline, deadline + 86400);
+}
+
+#[test]
+fn test_auto_extension_not_triggered_below_threshold() {
+    let (env, client, creator, token_address, admin) = setup_env();
+
+    let deadline = env.ledger().timestamp() + 7200;
+    let goal: i128 = 1_000_000;
+    let min_contribution: i128 = 1_000;
+    let auto_extension_threshold: i128 = 100_000;
+
+    client.initialize(&creator, &token_address, &goal, &deadline, &min_contribution, &Some(auto_extension_threshold));
+
+    // Move to within the auto-extension window.
+    env.ledger().set_timestamp(deadline - 1800);
+
+    let contributor = Address::generate(&env);
+    mint_to(&env, &token_address, &admin, &contributor, 50_000);
+    client.contribute(&contributor, &50_000);
+
+    // Deadline should NOT be extended (contribution below threshold).
+    assert_eq!(client.deadline(), deadline);
+}
+
+#[test]
+fn test_auto_extension_not_triggered_outside_window() {
+    let (env, client, creator, token_address, admin) = setup_env();
+
+    let deadline = env.ledger().timestamp() + 7200;
+    let goal: i128 = 1_000_000;
+    let min_contribution: i128 = 1_000;
+    let auto_extension_threshold: i128 = 100_000;
+
+    client.initialize(&creator, &token_address, &goal, &deadline, &min_contribution, &Some(auto_extension_threshold));
+
+    // Contribute outside the auto-extension window (more than 1 hour before deadline).
+    env.ledger().set_timestamp(deadline - 5000);
+
+    let contributor = Address::generate(&env);
+    mint_to(&env, &token_address, &admin, &contributor, 150_000);
+    client.contribute(&contributor, &150_000);
+
+    // Deadline should NOT be extended (outside window).
+    assert_eq!(client.deadline(), deadline);
+}
+
+#[test]
+fn test_auto_extension_cap_prevents_infinite_extension() {
+    let (env, client, creator, token_address, admin) = setup_env();
+
+    let deadline = env.ledger().timestamp() + 7200;
+    let goal: i128 = 10_000_000;
+    let min_contribution: i128 = 1_000;
+    let auto_extension_threshold: i128 = 100_000;
+
+    client.initialize(&creator, &token_address, &goal, &deadline, &min_contribution, &Some(auto_extension_threshold));
+
+    // Trigger 5 extensions (the maximum).
+    for _i in 0..5 {
+        let current_deadline = client.deadline();
+        env.ledger().set_timestamp(current_deadline - 1800);
+
+        let contributor = Address::generate(&env);
+        mint_to(&env, &token_address, &admin, &contributor, 150_000);
+        client.contribute(&contributor, &150_000);
+
+        // Verify extension occurred.
+        assert_eq!(client.deadline(), current_deadline + 86400);
+    }
+
+    // Try to trigger a 6th extension.
+    let final_deadline = client.deadline();
+    env.ledger().set_timestamp(final_deadline - 1800);
+
+    let contributor = Address::generate(&env);
+    mint_to(&env, &token_address, &admin, &contributor, 150_000);
+    client.contribute(&contributor, &150_000);
+
+    // Deadline should NOT be extended (cap reached).
+    assert_eq!(client.deadline(), final_deadline);
+}
+
+#[test]
+fn test_auto_extension_disabled_when_not_configured() {
+    let (env, client, creator, token_address, admin) = setup_env();
+
+    let deadline = env.ledger().timestamp() + 7200;
+    let goal: i128 = 1_000_000;
+    let min_contribution: i128 = 1_000;
+
+    client.initialize(&creator, &token_address, &goal, &deadline, &min_contribution, &None);
+
+    // Move to within the auto-extension window.
+    env.ledger().set_timestamp(deadline - 1800);
+
+    let contributor = Address::generate(&env);
+    mint_to(&env, &token_address, &admin, &contributor, 150_000);
+    client.contribute(&contributor, &150_000);
+
+    // Deadline should NOT be extended (feature not configured).
+    assert_eq!(client.deadline(), deadline);
+}
