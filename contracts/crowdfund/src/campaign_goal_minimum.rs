@@ -13,6 +13,8 @@
 /// A goal of zero enables a trivial drain exploit; 1 closes that surface.
 pub const MIN_GOAL_AMOUNT: i128 = 1;
 
+/// Minimum contribution amount in token units.
+pub const MIN_CONTRIBUTION_AMOUNT: i128 = 1;
 /// @notice Minimum allowed `min_contribution` value in token units.
 ///
 /// @dev    Prevents contributions of 0 tokens, which would allow an attacker
@@ -109,6 +111,26 @@ pub fn validate_platform_fee(fee_bps: u32) -> Result<(), &'static str> {
 
 /// @notice Computes campaign funding progress in basis points.
 ///
+/// Security: A zero-goal campaign is immediately "successful" after any
+/// contribution, letting the creator drain funds with no real commitment.
+/// Integer-overflow safety: single signed comparison, no arithmetic.
+#[inline]
+pub fn validate_goal_amount(
+    _env: &soroban_sdk::Env,
+    goal_amount: i128,
+) -> Result<(), crate::ContractError> {
+    if goal_amount < MIN_GOAL_AMOUNT {
+        return Err(crate::ContractError::GoalTooLow);
+    }
+    Ok(())
+}
+
+// ── Progress computation ─────────────────────────────────────────────────────
+
+/// Computes campaign progress in basis points (0–10 000).
+/// Returns 0 if goal <= 0.
+/// Caps at MAX_PROGRESS_BPS even when total_raised > goal (over-funded).
+/// Uses integer division; precision loss is acceptable for UI display.
 /// @dev    `progress_bps = (total_raised * PROGRESS_BPS_SCALE) / goal`.
 ///         Result is capped at `MAX_PROGRESS_BPS` for over-funded campaigns.
 ///         Returns 0 when `goal <= 0` to avoid division by zero.
@@ -125,9 +147,33 @@ pub fn compute_progress_bps(total_raised: i128, goal: i128) -> u32 {
     if goal <= 0 {
         return 0;
     }
+    let progress = (total_raised * PROGRESS_BPS_SCALE) / goal;
+    if progress > MAX_PROGRESS_BPS as i128 {
+        MAX_PROGRESS_BPS
+    } else {
+        progress as u32
+    }
+}
+
+/// Creates a new campaign with goal validation.
+///
+/// # Parameters
+/// - creator: campaign owner
+/// - goal: funding target
+///
+/// # Security
+/// Ensures goal meets minimum threshold and creator is authenticated.
+pub fn create_campaign(env: soroban_sdk::Env, creator: soroban_sdk::Address, goal: u64) {
+    creator.require_auth();
+    if goal < MIN_CAMPAIGN_GOAL {
+        panic!("Goal too low");
+    }
+    env.events().publish(("campaign", "created"), (creator, goal));
     let raw = total_raised.saturating_mul(PROGRESS_BPS_SCALE) / goal;
     if raw >= PROGRESS_BPS_SCALE {
         return MAX_PROGRESS_BPS;
     }
     raw.max(0) as u32
 }
+
+const MIN_CAMPAIGN_GOAL: u64 = 1;

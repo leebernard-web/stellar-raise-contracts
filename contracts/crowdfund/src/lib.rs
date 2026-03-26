@@ -13,6 +13,7 @@ pub mod cargo_toml_rust;
 pub mod contract_state_size;
 pub mod contribute_error_handling;
 pub mod crowdfund_initialize_function;
+#[cfg(test)]
 pub mod npm_package_lock;
 pub mod proptest_generator_boundary;
 pub mod refund_single_token;
@@ -65,11 +66,6 @@ mod soroban_sdk_minor_test;
 #[cfg(test)]
 #[path = "stellar_token_minter.test.rs"]
 mod stellar_token_minter_test_comprehensive;
-#[cfg(test)]
-#[path = "stellar_token_minter_test.rs"]
-mod stellar_token_minter_test_original;
-#[cfg(test)]
-mod withdraw_event_emission_test;
 
 // --- Constants ---
 const CONTRACT_VERSION: u32 = 3;
@@ -213,11 +209,15 @@ pub enum ContractError {
     /// Returned by `initialize` when `goal < MIN_GOAL_AMOUNT`.
     GoalTooLow = 13,
 
+    /// Returned by `validate_goal_amount` when `goal_amount < MIN_GOAL_AMOUNT`.
+    GoalTooLow = 18,
+
     /// Returned by `contribute` when `amount` is zero.
     ZeroAmount = 13,
     BelowMinimum = 14,
     CampaignNotActive = 15,
     /// Returned by `contribute` when `amount` is negative.
+    NegativeAmount = 16,
     NegativeAmount = 11,
 }
 

@@ -180,7 +180,7 @@ mod tests {
     // ── Clamping Functions ────────────────────────────────────────────────────
 
     #[test]
-    fn test_clamp_proptest_cases() {
+    fn test_is_valid_fee_bps_invalid_cases() {
         let (_env, client) = setup();
         // Below minimum
         assert_eq!(client.clamp_proptest_cases(&0), PROPTEST_CASES_MIN);
@@ -279,6 +279,76 @@ mod tests {
     }
 
     #[test]
+    fn test_compute_progress_bps_negative_raised() {
+        let (_env, client) = setup();
+        assert_eq!(client.compute_progress_bps(&-1_000, &1_000), 0);
+        assert_eq!(client.compute_progress_bps(&-100_000_000, &1_000), 0);
+    }
+
+    #[test]
+    fn test_compute_progress_bps_partial_progress() {
+        let (_env, client) = setup();
+        assert_eq!(client.compute_progress_bps(&500, &1_000), 5_000);
+        assert_eq!(client.compute_progress_bps(&250, &1_000), 2_500);
+        assert_eq!(client.compute_progress_bps(&1, &1_000), 10);
+    }
+
+    #[test]
+    fn test_compute_progress_bps_full_progress() {
+        let (_env, client) = setup();
+        assert_eq!(client.compute_progress_bps(&1_000, &1_000), 10_000);
+        assert_eq!(client.compute_progress_bps(&100_000_000, &100_000_000), 10_000);
+    }
+
+    #[test]
+    fn test_compute_progress_bps_over_goal() {
+        let (_env, client) = setup();
+        assert_eq!(client.compute_progress_bps(&2_000, &1_000), 10_000);
+        assert_eq!(client.compute_progress_bps(&200_000_000, &100_000_000), 10_000);
+    }
+
+    // ── compute_fee_amount Tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_compute_fee_amount_zero_amount() {
+        let (_env, client) = setup();
+        assert_eq!(client.compute_fee_amount(&0, &1_000), 0);
+        assert_eq!(client.compute_fee_amount(&0, &10_000), 0);
+    }
+
+    #[test]
+    fn test_compute_fee_amount_negative_amount() {
+        let (_env, client) = setup();
+        assert_eq!(client.compute_fee_amount(&-1_000, &1_000), 0);
+        assert_eq!(client.compute_fee_amount(&-100_000_000, &5_000), 0);
+    }
+
+    #[test]
+    fn test_compute_fee_amount_zero_fee() {
+        let (_env, client) = setup();
+        assert_eq!(client.compute_fee_amount(&1_000, &0), 0);
+        assert_eq!(client.compute_fee_amount(&100_000_000, &0), 0);
+    }
+
+    #[test]
+    fn test_compute_fee_amount_valid_calculations() {
+        let (_env, client) = setup();
+        assert_eq!(client.compute_fee_amount(&1_000, &1_000), 100);
+        assert_eq!(client.compute_fee_amount(&1_000, &5_000), 500);
+        assert_eq!(client.compute_fee_amount(&1_000, &10_000), 1_000);
+        assert_eq!(client.compute_fee_amount(&10_000, &1_000), 1_000);
+    }
+
+    #[test]
+    fn test_compute_fee_amount_large_values() {
+        let (_env, client) = setup();
+        assert_eq!(client.compute_fee_amount(&100_000_000, &1_000), 10_000_000);
+        assert_eq!(client.compute_fee_amount(&100_000_000, &5_000), 50_000_000);
+    }
+
+    // ── log_tag Tests ────────────────────────────────────────────────────────
+
+    #[test]
     fn test_log_tag() {
         let (env, client) = setup();
         assert_eq!(client.log_tag(), Symbol::new(&env, "boundary"));
@@ -289,14 +359,23 @@ mod tests {
     //         Each property is tested with 64+ randomly generated cases.
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(64))]
+        #![proptest_config(ProptestConfig::with_cases(256))]
 
+        /// Property: All valid deadline offsets pass validation.
         #[test]
         fn prop_deadline_offset_validity(offset in DEADLINE_OFFSET_MIN..=DEADLINE_OFFSET_MAX) {
             let (_env, client) = setup();
             prop_assert!(client.is_valid_deadline_offset(&offset));
         }
 
+        /// Property: All invalid deadline offsets fail validation.
+        #[test]
+        fn prop_deadline_offset_invalidity(offset in 0u64..DEADLINE_OFFSET_MIN) {
+            let (_env, client) = setup();
+            prop_assert!(!client.is_valid_deadline_offset(&offset));
+        }
+
+        /// Property: All valid goals pass validation.
         #[test]
         fn prop_deadline_offset_below_min_invalid(offset in 0u64..DEADLINE_OFFSET_MIN) {
             let (_env, client) = setup();
@@ -315,6 +394,7 @@ mod tests {
             prop_assert!(client.is_valid_goal(&goal));
         }
 
+        /// Property: All invalid goals fail validation.
         #[test]
         fn prop_goal_below_min_invalid(goal in i128::MIN..GOAL_MIN) {
             let (_env, client) = setup();

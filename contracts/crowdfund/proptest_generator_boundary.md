@@ -158,6 +158,8 @@ assert!(!client.is_valid_contribution_amount(&999, &1_000));   // ✗ Below mini
 
 ---
 
+@notice Ensures contributions meet the minimum threshold.
+
 ### `is_valid_fee_bps(fee_bps: u32) -> bool`
 
 Validates that `fee_bps <= FEE_BPS_CAP`.
@@ -171,6 +173,12 @@ Validates that `fee_bps <= FEE_BPS_CAP`.
 assert!(client.is_valid_fee_bps(&5_000));     // ✓ Valid (50%)
 assert!(!client.is_valid_fee_bps(&10_001));   // ✗ Exceeds 100%
 ```
+
+### `is_valid_generator_batch_size(batch_size: u32) -> bool`
+
+Returns `true` if `batch_size ∈ [1, GENERATOR_BATCH_MAX]`.
+
+@notice Prevents worst-case memory/gas spikes in test scaffolds.
 
 ---
 
@@ -248,6 +256,11 @@ assert_eq!(client.compute_progress_bps(&500, &1000), 5000);   // 50%
 assert_eq!(client.compute_progress_bps(&2000, &1000), 10000); // 200% → capped
 assert_eq!(client.compute_progress_bps(&500, &0), 0);         // Zero goal → 0%
 ```
+
+**Implementation Details**:
+- Uses `saturating_mul` to prevent integer overflow
+- Returns 0 for non-positive amounts
+- Uses integer floor division for precision
 
 ---
 

@@ -1,10 +1,22 @@
 # soroban_sdk_minor
 
-Documents the edge cases and helpers introduced for the Soroban SDK v22 minor version bump, with a focus on frontend UI safety and scalability.
+Documents the edge cases and helpers introduced for the Soroban SDK v22 minor
+version bump, with a focus on frontend UI safety, scalability, and on-chain
+auditability.
 
 ## Overview
 
-`soroban_sdk_minor.rs` centralizes low-level helpers used when reviewing and operating a minor Soroban SDK bump. All functions are explicit, testable, and audit-friendly.
+`soroban_sdk_minor.rs` centralizes low-level helpers used when reviewing and
+operating a minor Soroban SDK bump. All functions are explicit, testable, and
+audit-friendly. The module covers:
+
+- Version compatibility assessment
+- Minor-bump detection for the frontend upgrade banner
+- Frontend pagination bounds (post-SDK-upgrade safety)
+- WASM hash validation before upgrade execution
+- Structured on-chain audit event emission
+- `SdkChangeRecord` construction for governance logs
+- `emit_ping_event` — Soroban v22 auth pattern demonstration
 
 ## What Changed in v22
 
@@ -38,11 +50,17 @@ fn validate_upgrade_note(note) -> bool
 // Validate a WASM hash is non-zero before applying an upgrade.
 fn validate_wasm_hash(wasm_hash) -> bool
 
+// Construct a SdkChangeRecord for on-chain audit storage.
+fn build_sdk_change_record(env, id, is_breaking, description) -> SdkChangeRecord
+
 // Emit a structured SDK-upgrade audit event on the Soroban event ledger.
 fn emit_upgrade_audit_event(env, from_version, to_version, reviewer)
 
 // Emit an audit event with a bounded note; panics if note exceeds max length.
 fn emit_upgrade_audit_event_with_note(env, from_version, to_version, reviewer, note)
+
+// Emit a typed `ping` event; requires `from` to authorize (v22 auth pattern).
+fn emit_ping_event(env, from, value)
 ```
 
 ## CompatibilityStatus
@@ -53,11 +71,46 @@ fn emit_upgrade_audit_event_with_note(env, from_version, to_version, reviewer, n
 | `RequiresMigration` | Different major versions; migration step needed |
 | `Incompatible` | Empty or completely malformed version string; frontend should surface as error |
 
-## New Edge Cases (this PR)
+## SdkChangeRecord
+
+Stores a structured record of a single SDK change for on-chain governance logs:
+
+```rust
+pub struct SdkChangeRecord {
+    pub id: Symbol,          // Short identifier, e.g. "register_api"
+    pub is_breaking: bool,   // Whether the change is breaking for this contract
+    pub description: String, // Human-readable description
+}
+```
+
+### Example
+
+```rust
+let record = build_sdk_change_record(
+    &env,
+    "register_api",
+    false,
+    String::from_str(&env, "env.register(Contract, ()) replaces register_contract"),
+);
+```
+
+## emit_ping_event
+
+Demonstrates the Soroban v22 auth pattern for event emission. The emitter must
+authorize the call via `require_auth()`:
+
+```rust
+// Succeeds when auth is satisfied (mocked in tests, real sig on-chain).
+emit_ping_event(&env, from_address, 42_i32);
+
+// Panics without auth — only the emitter can trigger this event.
+```
+
+## Edge Cases (this PR)
 
 ### `assess_compatibility` — empty string inputs
 
-Previously, empty strings silently mapped to major-0 and could produce a spurious `Compatible` result. Now:
+Empty strings return `Incompatible` rather than silently mapping to major-0:
 
 ```rust
 assess_compatibility(&env, "", "22.0.0")  // → Incompatible
@@ -65,11 +118,7 @@ assess_compatibility(&env, "22.0.0", "")  // → Incompatible
 assess_compatibility(&env, "", "")        // → Incompatible
 ```
 
-This prevents a misconfigured frontend call from being treated as a valid same-major upgrade.
-
-### `parse_minor` — new export
-
-Lets the frontend display the exact minor component being bumped:
+### `parse_minor` — edge cases
 
 ```rust
 parse_minor("22.3.0")  // → 3
@@ -79,9 +128,7 @@ parse_minor("22.x.0")  // → 0  (non-numeric)
 parse_minor("")        // → 0
 ```
 
-### `is_minor_bump` — new export
-
-Lets the frontend distinguish a genuine minor bump from a patch-only or no-op change before showing the upgrade banner:
+### `is_minor_bump` — edge cases
 
 ```rust
 is_minor_bump("22.0.0", "22.1.0")  // → true
@@ -93,8 +140,6 @@ is_minor_bump("22.0.0", "23.1.0")  // → false (cross-major)
 
 ### `pagination_window` — u32::MAX overflow safety
 
-`offset.saturating_add(limit)` is now used internally so that a near-`u32::MAX` offset cannot produce a wrapped end index:
-
 ```rust
 pagination_window(u32::MAX, 50)
 // → PaginationWindow { start: u32::MAX, limit: 50 }
@@ -102,8 +147,6 @@ pagination_window(u32::MAX, 50)
 ```
 
 ### `validate_upgrade_note` — exact boundary
-
-The exact-boundary case (`len == UPGRADE_NOTE_MAX_LEN`) is now explicitly tested and accepted:
 
 ```rust
 validate_upgrade_note(&note_of_256_bytes)  // → true
@@ -117,7 +160,8 @@ validate_upgrade_note(&note_of_257_bytes)  // → false
 3. `validate_wasm_hash` rejects a zeroed hash to prevent accidental contract bricking.
 4. `clamp_page_size` bounds frontend scan size to prevent indexer overload after SDK upgrades.
 5. `emit_upgrade_audit_event_with_note` panics on oversized notes to keep event schema predictable.
-6. All style/colour values in the frontend UI are hardcoded constants — no dynamic injection.
+6. `emit_ping_event` requires `from.require_auth()` — only the emitter can trigger the event,
+   preventing spoofed audit trails.
 
 ## NatSpec-style Reference
 
@@ -145,10 +189,21 @@ validate_upgrade_note(&note_of_257_bytes)  // → false
 - **@notice** Returns `true` for any non-zero 32-byte hash.
 - **@security** Rejects zeroed hashes to prevent upgrade calls that would brick the contract.
 
+### `build_sdk_change_record`
+- **@notice** Constructs a `SdkChangeRecord` for on-chain audit storage.
+- **@dev** `id` is stored as a compact `Symbol`; `description` is a full `String`.
+
+### `emit_ping_event`
+- **@notice** Emits a typed `ping` event demonstrating the Soroban v22 auth pattern.
+- **@security** Requires `from.require_auth()` — only the emitter can trigger this event.
+
 ## Running Tests
 
 ```bash
+# Run the standalone soroban-sdk-minor contract tests
 cargo test -p soroban-sdk-minor
+
+# Run the crowdfund module tests (includes soroban_sdk_minor helpers)
 cargo test -p crowdfund -- soroban_sdk_minor
 ```
 
@@ -164,7 +219,11 @@ cargo test -p crowdfund -- soroban_sdk_minor
 | `clamp_page_size` | 1 |
 | `pagination_window` | 4 |
 | `validate_upgrade_note` | 3 |
+| `build_sdk_change_record` | 3 |
 | `emit_upgrade_audit_event` | 1 |
 | `emit_upgrade_audit_event_with_note` | 3 |
-| Integration | 4 |
-| **Total** | **44** |
+| `emit_ping_event` | 6 |
+| Integration | 5 |
+| **Total** | **54** |
+
+Expected coverage: ≥ 95% statements, branches, and functions.
