@@ -1,5 +1,5 @@
 #![cfg(test)]
-use soroban_sdk::{testutils::{Address as _, Events}, Address, BytesN, Env};
+use soroban_sdk::{testutils::Address as _, Address, BytesN, Env};
 use crate::{CrowdfundContract, CrowdfundContractClient};
 
 #[test]
@@ -10,11 +10,22 @@ fn test_admin_upgrade_validation() {
     let admin = Address::generate(&env);
     let creator = Address::generate(&env);
     let token = Address::generate(&env);
-    
+
     let contract_id = env.register(CrowdfundContract, ());
     let client = CrowdfundContractClient::new(&env, &contract_id);
 
-    client.initialize(&admin, &creator, &token, &1000i128, &10000u64, &10i128, &None, &None, &None);
+    client.initialize(
+        &admin,
+        &creator,
+        &token,
+        &1000i128,
+        &10000u64,
+        &10i128,
+        &None,
+        &None,
+        &None,
+        &None, // metadata_uri
+    );
 
     let new_wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
 
@@ -35,14 +46,27 @@ fn test_unauthorized_upgrade_fail() {
     let admin = Address::generate(&env);
     let creator = Address::generate(&env);
     let token = Address::generate(&env);
-    
+
     let contract_id = env.register(CrowdfundContract, ());
     let client = CrowdfundContractClient::new(&env, &contract_id);
 
-    client.initialize(&admin, &creator, &token, &1000i128, &10000u64, &10i128, &None, &None, &None);
+    // Initialize with mock_all_auths so initialize() succeeds
+    env.mock_all_auths();
+    client.initialize(
+        &admin,
+        &creator,
+        &token,
+        &1000i128,
+        &10000u64,
+        &10i128,
+        &None,
+        &None,
+        &None,
+        &None, // metadata_uri
+    );
 
+    // Clear auths — upgrade() must fail without admin auth
+    env.set_auths(&[]);
     let new_wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
-
-    // We do NOT mock auth, so calling from a random context will fail
     client.upgrade(&new_wasm_hash);
 }
