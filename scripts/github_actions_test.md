@@ -90,7 +90,10 @@ Without a timeout, a hung build can consume a GitHub Actions runner for up to
 6 hours, blocking other PRs and wasting CI minutes. A 30-minute cap is
 recommended for the main job.
 
-### Check 11 — `testnet_smoke.yml` has least-privilege permissions
+| Script | Purpose |
+|---|---|
+| `scripts/github_actions_test.sh` | Validates workflow files in CI or locally (12 checks) |
+| `scripts/github_actions_test.test.sh` | Tests the validator against pass/fail scenarios (13 tests) |
 
 The smoke test only needs to read source code. Explicit
 `permissions: contents: read` prevents a compromised job from pushing commits
@@ -106,18 +109,18 @@ up contract uploads.
 
 ## Speed optimisations in `rust_ci.yml`
 
-| Optimisation | Detail |
-|---|---|
-| Single WASM build | Removed duplicate build step (~90 s saved per run) |
-| Scoped build (`-p crowdfund`) | Compiles only the required crate |
-| `Swatinem/rust-cache@v2` | Caches `~/.cargo` and `target/` between runs |
-| `cache: "npm"` in `setup-node` | Restores `~/.npm` automatically |
-| Parallel `frontend` job | UI tests run alongside Rust checks, not after |
-| `timeout-minutes` bounds | Job: 30 min · WASM build: 10 min · Tests: 15 min |
-| `wasm-opt -Oz` | Reduces WASM binary size 20–40% |
-| Elapsed-time log step | Fires on success and failure; warns if > 20 min |
+| What | Where | Value |
+|---|---|---|
+| Job hard timeout | `jobs.check.timeout-minutes` | 30 min |
+| WASM build step timeout | `Build crowdfund WASM for tests` step | 10 min |
+| Test step timeout | `Run tests including property-based tests` step | 15 min |
+| Elapsed-time log | `Log total job elapsed time` step (always runs) | soft warn at 20 min |
 
 ---
+
+The validator (`github_actions_test.sh`) enforces all four bounds with dedicated
+checks (checks 8–12). Any workflow that removes a timeout or the elapsed-time
+step will fail CI immediately.
 
 ## Security notes
 
