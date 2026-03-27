@@ -30,10 +30,6 @@ mod auth_tests;
 pub mod campaign_goal_minimum;
 #[cfg(test)]
 mod campaign_goal_minimum_test;
-pub mod contract_state_size;
-#[cfg(test)]
-#[path = "contract_state_size.test.rs"]
-mod contract_state_size_test;
 pub mod contribute_error_handling;
 #[cfg(test)]
 mod contribute_error_handling_tests;
@@ -293,7 +289,7 @@ impl CrowdfundContract {
             return Err(ContractError::CampaignEnded);
         }
 
-        let mut contributors: Vec<Address> = env
+        let contributors: Vec<Address> = env
             .storage()
             .persistent()
             .get(&DataKey::Contributors)
@@ -414,7 +410,7 @@ impl CrowdfundContract {
             return Err(ContractError::CampaignEnded);
         }
 
-        let mut pledgers: Vec<Address> = env
+        let pledgers: Vec<Address> = env
             .storage()
             .persistent()
             .get(&DataKey::Pledgers)

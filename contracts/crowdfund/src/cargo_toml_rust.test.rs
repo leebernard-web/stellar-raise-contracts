@@ -5,8 +5,7 @@
 //! - `all_deprecated_versions_replaced` guards against re-introducing old deps.
 //! - `dev_only` flag on proptest confirms it never enters the WASM binary.
 
-#![cfg(test)]
-
+#[allow(deprecated)]
 use crate::cargo_toml_rust::{
     all_deprecated_versions_replaced, audited_dependencies, DepRecord, PROPTEST_VERSION,
     PROPTEST_VERSION_DEPRECATED, SOROBAN_SDK_VERSION, SOROBAN_SDK_VERSION_DEPRECATED,
