@@ -1,8 +1,6 @@
 # Proptest Generator Boundary Conditions
 
-## NatSpec-Style Documentation
-
-### Overview
+## Overview
 
 This document describes the boundary constants and validation helpers used by
 proptest generators for the Stellar Raise crowdfund contract. Correct boundaries
@@ -25,6 +23,8 @@ frontend UI display.
 | `PROPTEST_CASES_MIN` | 32 | Minimum proptest cases per property test |
 | `PROPTEST_CASES_MAX` | 256 | Maximum proptest cases per property test |
 | `GENERATOR_BATCH_MAX` | 512 | Maximum generator output batch size |
+| `MAX_TOKEN_DECIMALS` | 18 | Maximum token decimal precision safe for JS display |
+| `DEADLINE_ENDING_SOON_THRESHOLD` | 3 600 | Seconds below which the UI shows "Ending Soon" |
 
 ---
 
@@ -44,9 +44,6 @@ frontend UI display.
 ---
 
 ## Pure Validation Helpers
-
-These are standalone `pub fn` (no `Env`) exported from `proptest_generator_boundary.rs`
-for direct use in `#[cfg(test)]` proptest blocks.
 
 ### `is_valid_deadline_offset(offset: u64) -> bool`
 
@@ -92,17 +89,88 @@ Clamps a requested case count to `[PROPTEST_CASES_MIN, PROPTEST_CASES_MAX]`.
 
 ---
 
+## New Edge-Case Helpers (Issue #423)
+
+### `is_ui_displayable_progress(bps: u32) -> bool`
+
+Returns `true` if `bps ∈ [0, PROGRESS_BPS_CAP]`.
+
+**Frontend UX**: Rejects any value that would cause the progress bar to render
+above 100 % or produce a broken visual state. Always call this before passing
+a bps value to the frontend progress component.
+
+**Security**: Values above `PROGRESS_BPS_CAP` would overflow a CSS `width`
+percentage and mislead contributors about campaign status.
+
+### `compute_display_percent(bps: u32) -> u32`
+
+Converts basis points to a display percentage scaled by 100 (range `[0, 10_000]`).
+
+Divide the result by 100 to get the human-readable percentage string:
+
+```
+bps = 5_000  →  compute_display_percent(5_000) = 5_000  →  "50.00 %"
+bps = 10_001 →  clamped to 10_000               →  "100.00 %"
+```
+
+**Frontend UX**: Avoids floating-point arithmetic on-chain while giving the
+frontend enough precision to render two decimal places.
+
+### `is_contribution_ui_safe(amount: i128, min_contribution: i128, token_decimals: u32) -> bool`
+
+Returns `true` when:
+
+1. `amount >= min_contribution`
+2. `token_decimals <= MAX_TOKEN_DECIMALS`
+3. `amount * 10^token_decimals` does not overflow `i128`
+
+**Frontend UX**: Prevents the token-amount display layer from losing precision
+when converting raw stroops to a human-readable decimal string. JavaScript
+`Number` loses integer precision above 2^53; this guard keeps amounts within
+safe bounds.
+
+**Security**: Rejects `token_decimals > 18` to prevent silent precision loss
+in the frontend display layer.
+
+### `deadline_ui_state(seconds_remaining: u64) -> DeadlineUiState`
+
+Classifies a remaining-seconds value into one of three frontend visual states:
+
+| State | Condition | UI Behaviour |
+|---|---|---|
+| `Expired` | `seconds_remaining == 0` | Campaign ended banner |
+| `EndingSoon` | `0 < seconds_remaining <= 3 600` | Amber countdown banner |
+| `Active` | `seconds_remaining > 3 600` | Normal countdown display |
+
+**Frontend UX**: Drives the campaign card's countdown component. The `EndingSoon`
+state triggers an amber visual treatment to encourage last-minute contributions.
+
+**Security**: Treats `seconds_remaining == 0` as `Expired` regardless of clock
+skew, preventing the UI from showing an active campaign after the on-chain
+deadline has passed.
+
+### `compute_net_payout(total: i128, fee_bps: u32) -> Option<i128>`
+
+Computes the creator's net payout after platform fee deduction.
+
+Returns `None` when:
+- `fee_bps > FEE_BPS_CAP` (invalid fee configuration)
+
+Returns `Some(0)` when:
+- `total <= 0`
+
+Otherwise returns `Some(total - fee)` where `fee = total * fee_bps / 10_000`.
+
+**Security**: Uses `checked_mul` and `checked_sub` to prevent overflow and
+underflow. Rejects `fee_bps > FEE_BPS_CAP` before any arithmetic to prevent
+a misconfigured fee from silently producing a wrong payout amount.
+
+---
+
 ## On-Chain Contract
 
-`ProptestGeneratorBoundary` exposes the same constants and validation logic
-on-chain so off-chain scripts can query current platform limits without
-hard-coding them.
-
-```rust
-use crate::proptest_generator_boundary::{
-    ProptestGeneratorBoundary, ProptestGeneratorBoundaryClient,
-};
-```
+`ProptestGeneratorBoundary` exposes all constants and validation logic on-chain
+so off-chain scripts can query current platform limits without hard-coding them.
 
 All contract methods are pure (read-only) and do not modify state.
 
@@ -119,7 +187,11 @@ All contract methods are pure (read-only) and do not modify state.
    far-future deadlines.
 4. **Basis points**: `PROGRESS_BPS_CAP` and `FEE_BPS_CAP` are both 10 000,
    ensuring frontend displays never exceed 100 %.
-5. **Immutable constants**: All limits are compile-time constants and cannot
+5. **Token decimals**: `MAX_TOKEN_DECIMALS = 18` prevents JavaScript Number
+   precision loss in the frontend display layer.
+6. **Net payout**: `compute_net_payout` returns `None` for invalid fee
+   configurations, forcing callers to handle the error explicitly.
+7. **Immutable constants**: All limits are compile-time constants and cannot
    be mutated at runtime.
 
 ---
@@ -136,7 +208,8 @@ Coverage targets:
 - Unit tests for every constant and validator
 - Property tests for valid/invalid ranges (256 cases each)
 - Edge-case regression seeds
-- Frontend UX edge cases (0 %, 100 %, over-funded)
+- Frontend UX edge cases (0 %, 100 %, over-funded, ending-soon, expired)
+- New Issue #423 edge cases fully covered
 
 ---
 
@@ -154,12 +227,14 @@ PROPTEST_CASES=1000 cargo test -p crowdfund proptest_generator_boundary
 
 ## Regression Seeds
 
-The following inputs previously caused failures and are pinned as regression tests:
-
 | Seed | Issue |
 |---|---|
 | `goal=1_000_000, offset=100` | Flaky timing race; 100 now rejected |
 | `goal=2_000_000, offset=100, amount=100_000` | Same root cause |
+| `raised=200_000_000, goal=100_000_000` | Over-funded must cap at 100 % |
+| `fee_bps=10_001, total=1_000` | Invalid fee must return None / 0 |
+| `seconds_remaining=0` | Must be Expired, not EndingSoon |
+| `token_decimals=19, amount=1_000` | Excess decimals must be rejected |
 
 ---
 

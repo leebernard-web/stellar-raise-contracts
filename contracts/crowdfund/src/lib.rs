@@ -8,7 +8,6 @@ use soroban_sdk::{
 
 pub mod access_control;
 pub mod admin_upgrade_mechanism;
-pub mod access_control;
 pub mod campaign_goal_minimum;
 pub mod cargo_toml_rust;
 pub mod contract_state_size;
@@ -40,8 +39,6 @@ use withdraw_event_emission::{emit_fee_transferred, emit_withdrawn, mint_nfts_in
 #[cfg(test)]
 mod access_control_tests;
 #[cfg(test)]
-mod access_control_tests;
-#[cfg(test)]
 #[path = "admin_upgrade_mechanism.test.rs"]
 mod admin_upgrade_mechanism_test;
 #[cfg(test)]
@@ -62,10 +59,11 @@ mod contribute_error_handling_tests;
 mod npm_package_lock_test;
 
 #[cfg(test)]
-pub mod proptest_generator_boundary;
-#[cfg(test)]
 #[path = "proptest_generator_boundary.test.rs"]
 mod proptest_generator_boundary_test;
+#[cfg(test)]
+#[path = "proptest_generator_boundary_tests.rs"]
+mod proptest_generator_boundary_tests;
 #[cfg(test)]
 #[path = "soroban_sdk_minor_test.rs"]
 mod soroban_sdk_minor_test;
@@ -220,17 +218,12 @@ pub enum ContractError {
     InvalidBonusGoal = 12,
     /// Returned by `initialize` when `goal < MIN_GOAL_AMOUNT`.
     GoalTooLow = 13,
-
-    /// Returned by `validate_goal_amount` when `goal_amount < MIN_GOAL_AMOUNT`.
-    GoalTooLow = 18,
-
     /// Returned by `contribute` when `amount` is zero.
-    ZeroAmount = 13,
-    BelowMinimum = 14,
-    CampaignNotActive = 15,
+    ZeroAmount = 14,
+    BelowMinimum = 15,
+    CampaignNotActive = 16,
     /// Returned by `contribute` when `amount` is negative.
-    NegativeAmount = 16,
-    NegativeAmount = 11,
+    NegativeAmount = 17,
 }
 
 /// Interface for an external NFT contract used to mint contributor rewards.
@@ -1135,5 +1128,4 @@ impl CrowdfundContract {
     pub fn nft_contract(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::NFTContract)
     }
-}
 }
